@@ -147,6 +147,62 @@ func (d *DB) CountDirs(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
+// BatchUpsert inserts or updates multiple directory entries in a single transaction.
+// scannedAt is applied to all entries.
+func (d *DB) BatchUpsert(ctx context.Context, entries []BatchEntry, scannedAt int64) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin batch upsert tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO directories (path, parent_path, name, size, mtime, shallow, scanned_at, pending_deletion)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+		ON CONFLICT(path) DO UPDATE SET
+			parent_path=excluded.parent_path,
+			name=excluded.name,
+			size=excluded.size,
+			mtime=excluded.mtime,
+			shallow=excluded.shallow,
+			scanned_at=excluded.scanned_at,
+			pending_deletion=0
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare batch upsert: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, e := range entries {
+		shallowInt := 0
+		if e.Shallow {
+			shallowInt = 1
+		}
+		if _, err := stmt.ExecContext(ctx, e.Path, e.ParentPath, e.Name, e.Size, e.Mtime, shallowInt, scannedAt); err != nil {
+			return fmt.Errorf("batch upsert %s: %w", e.Path, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit batch upsert: %w", err)
+	}
+	return nil
+}
+
+// BatchEntry is a directory entry for batch upsert operations.
+type BatchEntry struct {
+	Path       string
+	ParentPath string
+	Name       string
+	Size       int64
+	Mtime      int64
+	Shallow    bool
+}
+
 // scanDirEntries scans rows from a SELECT with columns: path, parent_path, name, size, mtime, shallow.
 func scanDirEntries(rows *sql.Rows) ([]DirEntry, error) {
 	var entries []DirEntry
