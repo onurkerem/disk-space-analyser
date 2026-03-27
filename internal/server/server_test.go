@@ -30,7 +30,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("open memory db: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
-	return New(database, 0)
+	return New(database, 0, "/")
 }
 
 func TestSummaryDefault(t *testing.T) {
@@ -335,6 +335,18 @@ func TestReportPlaceholder(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want text/html; charset=utf-8", ct)
+	}
+
+	body := make([]byte, 512)
+	n, _ := resp.Body.Read(body)
+	bodyStr := string(body[:n])
+	if !containsSubstring(bodyStr, "<!DOCTYPE") && !containsSubstring(bodyStr, "<html") {
+		t.Errorf("response body does not contain HTML doctype or html tag; got: %s", bodyStr[:min(100, len(bodyStr))])
+	}
 }
 
 func TestJSONContentType(t *testing.T) {
@@ -368,4 +380,137 @@ func TestJSONContentType(t *testing.T) {
 		t.Errorf("tree Content-Type = %q, want application/json", ct)
 	}
 	resp.Body.Close()
+}
+
+func TestMeta(t *testing.T) {
+	srv := newTestServer(t)
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/meta")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result["root"] != "/" {
+		t.Errorf("root = %q, want /", result["root"])
+	}
+}
+
+func TestMetaCustomRoot(t *testing.T) {
+	database, err := db.OpenMemory()
+	if err != nil {
+		t.Fatalf("open memory db: %v", err)
+	}
+	defer database.Close()
+
+	srv := New(database, 0, "/Users/kerem")
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/meta")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result["root"] != "/Users/kerem" {
+		t.Errorf("root = %q, want /Users/kerem", result["root"])
+	}
+}
+
+func TestStaticAssets(t *testing.T) {
+	srv := newTestServer(t)
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Test CSS
+	resp, err := http.Get(ts.URL + "/static/style.css")
+	if err != nil {
+		t.Fatalf("get css: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("css status = %d, want 200", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !containsSubstring(ct, "text/css") {
+		t.Errorf("css Content-Type = %q, want text/css", ct)
+	}
+
+	// Test JS
+	resp, err = http.Get(ts.URL + "/static/app.js")
+	if err != nil {
+		t.Fatalf("get js: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("js status = %d, want 200", resp.StatusCode)
+	}
+	ct = resp.Header.Get("Content-Type")
+	if !containsSubstring(ct, "javascript") && !containsSubstring(ct, "text/plain") {
+		t.Errorf("js Content-Type = %q, want javascript or text/plain", ct)
+	}
+}
+
+func TestMetaMethodNotAllowed(t *testing.T) {
+	srv := newTestServer(t)
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/meta", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", resp.StatusCode)
+	}
+}
+
+// --- helpers ---
+
+func containsSubstring(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstr(s, substr))
+}
+
+func containsSubstr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

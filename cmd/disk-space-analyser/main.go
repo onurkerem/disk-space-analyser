@@ -293,7 +293,7 @@ func runDaemon(rootPath string) {
 	}
 
 	// Start HTTP server — blocks until done closes (signal triggers graceful shutdown).
-	srv := server.New(database, server.DefaultPort)
+	srv := server.New(database, server.DefaultPort, rootPath)
 	log.Printf("daemon: http server listening on :%d", server.DefaultPort)
 	if err := srv.ListenAndServe(done); err != nil && err != http.ErrServerClosed {
 		log.Printf("daemon: http server error: %v", err)

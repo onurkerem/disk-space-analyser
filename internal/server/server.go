@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -15,8 +16,8 @@ import (
 	ifmt "disk-space-analyser/internal/fmt"
 )
 
-//go:embed web/report.html
-var staticAssets embed.FS
+//go:embed web
+var webFS embed.FS
 
 // DefaultPort is the default TCP port for the HTTP server.
 const DefaultPort = 3097
@@ -40,19 +41,30 @@ type Server struct {
 	httpServer *http.Server
 	database   *db.DB
 	mux        *http.ServeMux
+	rootPath   string
 }
 
 // New creates a new Server bound to the given database and port.
-func New(database *db.DB, port int) *Server {
+func New(database *db.DB, port int, rootPath string) *Server {
 	s := &Server{
 		database: database,
 		mux:      http.NewServeMux(),
+		rootPath: rootPath,
 	}
 
 	s.mux.HandleFunc("/api/summary", s.handleSummary)
 	s.mux.HandleFunc("/api/tree", s.handleTree)
+	s.mux.HandleFunc("/api/meta", s.handleMeta)
 	s.mux.HandleFunc("/report", s.handleReport)
 	s.mux.HandleFunc("/", s.handleRoot)
+
+	// Serve embedded static assets at /static/
+	subFS, err := fs.Sub(webFS, "web")
+	if err != nil {
+		log.Printf("server: warning: could not create sub FS for web assets: %v", err)
+	} else {
+		s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(subFS))))
+	}
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
@@ -152,13 +164,22 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	data, err := staticAssets.ReadFile("web/report.html")
+	data, err := webFS.ReadFile("web/index.html")
 	if err != nil {
 		http.Error(w, "report not found", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(data)
+}
+
+// handleMeta returns metadata about the scan, including the root path.
+func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"root": s.rootPath})
 }
 
 // handleRoot redirects to /report.
