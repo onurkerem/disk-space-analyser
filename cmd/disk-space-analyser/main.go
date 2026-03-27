@@ -14,6 +14,9 @@ import (
 	"disk-space-analyser/internal/daemon"
 	"disk-space-analyser/internal/db"
 	"disk-space-analyser/internal/scanner"
+	"disk-space-analyser/internal/server"
+
+	"net/http"
 )
 
 func main() {
@@ -289,8 +292,11 @@ func runDaemon(rootPath string) {
 		}
 	}
 
-	// Block until signal — S03 will add the HTTP server here.
-	log.Printf("daemon: entering idle (blocking until signal)")
-	<-done
-	log.Printf("daemon: exiting")
+	// Start HTTP server — blocks until done closes (signal triggers graceful shutdown).
+	srv := server.New(database, server.DefaultPort)
+	log.Printf("daemon: http server listening on :%d", server.DefaultPort)
+	if err := srv.ListenAndServe(done); err != nil && err != http.ErrServerClosed {
+		log.Printf("daemon: http server error: %v", err)
+	}
+	log.Printf("daemon: http server stopped")
 }
