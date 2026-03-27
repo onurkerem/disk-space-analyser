@@ -28,10 +28,10 @@ go build -o disk-space-analyser ./cmd/disk-space-analyser
 ## Usage
 
 ```bash
-disk-space-analyser start           # scan entire filesystem
-disk-space-analyser start /home     # scan a specific path
-disk-space-analyser stop            # stop the daemon
-disk-space-analyser status          # show daemon and last scan status
+./disk-space-analyser start           # scan entire filesystem
+./disk-space-analyser start /home     # scan a specific path
+./disk-space-analyser stop            # stop the daemon
+./disk-space-analyser status          # show daemon and last scan status
 ```
 
 After starting, the daemon scans in the background and starts an HTTP server. View the report at:
