@@ -59,6 +59,7 @@ func (s *Scanner) writer(ctx context.Context, results <-chan scanEntry) error {
 				Size:       entry.Size,
 				Mtime:      entry.Mtime,
 				Shallow:    entry.Shallow,
+				SkipSize:   entry.SkipSize,
 			})
 			if len(batch) >= s.batchSize {
 				if err := flush(); err != nil {

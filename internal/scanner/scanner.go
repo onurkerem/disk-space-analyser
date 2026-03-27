@@ -21,6 +21,7 @@ type scanEntry struct {
 	Size       int64
 	Mtime      int64
 	Shallow    bool
+	SkipSize   bool // if true, don't overwrite the existing size in DB
 }
 
 // Config holds tuning parameters for the scanner.
@@ -41,10 +42,11 @@ func DefaultConfig() Config {
 
 // Scanner performs concurrent filesystem scanning and persists results to SQLite.
 type Scanner struct {
-	db          *db.DB
-	concurrency int
-	batchSize   int
-	channelSize int
+	db              *db.DB
+	concurrency     int
+	batchSize       int
+	channelSize     int
+	shallowPatterns map[string]bool
 }
 
 // New creates a new Scanner with the given database and configuration.
@@ -59,10 +61,11 @@ func New(database *db.DB, cfg Config) *Scanner {
 		cfg.ChannelSize = DefaultConfig().ChannelSize
 	}
 	return &Scanner{
-		db:          database,
-		concurrency: cfg.Concurrency,
-		batchSize:   cfg.BatchSize,
-		channelSize: cfg.ChannelSize,
+		db:              database,
+		concurrency:     cfg.Concurrency,
+		batchSize:       cfg.BatchSize,
+		channelSize:     cfg.ChannelSize,
+		shallowPatterns: DefaultShallowPatterns,
 	}
 }
 
@@ -91,6 +94,13 @@ type dirResult struct {
 // Scan walks the directory tree rooted at root, computes per-directory sizes,
 // and persists all directory entries to the database.
 //
+// Incremental scanning: if a directory's mtime matches what's stored in DB,
+// it is skipped entirely (including all descendants). Directories no longer
+// present on disk are removed from DB via mark-and-sweep.
+//
+// Shallow scanning: directories matching DefaultShallowPatterns have their
+// total size computed recursively but no child entries are persisted.
+//
 // Architecture:
 //  1. Worker pool pulls directories from a work channel, reads them with os.ReadDir,
 //     and sends dirResult values to a result channel.
@@ -112,13 +122,26 @@ func (s *Scanner) Scan(ctx context.Context, root string) error {
 		return fmt.Errorf("resolve absolute path %s: %w", root, err)
 	}
 
+	// Pre-fetch all known mtimes for incremental skip checking.
+	// This avoids DB reads during the coordinator loop, which would deadlock
+	// with the writer's write transactions on the single-writer SQLite connection.
+	storedMtimes, err := s.db.GetAllMtimes(ctx)
+	if err != nil {
+		return fmt.Errorf("fetch stored mtimes: %w", err)
+	}
+
+	// Mark all existing entries for deletion (incremental: re-scanned dirs clear this flag).
+	if err := s.db.MarkAllForDeletion(ctx); err != nil {
+		return fmt.Errorf("mark for deletion: %w", err)
+	}
+
 	workCh := make(chan string, s.channelSize)
 	dirResultCh := make(chan dirResult, s.channelSize)
 	entryCh := make(chan scanEntry, s.channelSize)
 
 	var workerWg sync.WaitGroup
 
-	// Start worker pool.
+	// Start worker pool. Workers read from workCh and send results to dirResultCh.
 	for i := 0; i < s.concurrency; i++ {
 		workerWg.Add(1)
 		go func() {
@@ -138,6 +161,12 @@ func (s *Scanner) Scan(ctx context.Context, root string) error {
 		}()
 	}
 
+	// Close dirResultCh once all workers have exited.
+	go func() {
+		workerWg.Wait()
+		close(dirResultCh)
+	}()
+
 	// Start writer.
 	var writerErr error
 	var writerWg sync.WaitGroup
@@ -152,6 +181,24 @@ func (s *Scanner) Scan(ctx context.Context, root string) error {
 	dispatched := make(map[string]bool)
 	var pending int64 // directories in flight (dispatched but result not received)
 
+	// Check root mtime — skip if unchanged (incremental optimization).
+	rootMtime := info.ModTime().UnixMilli()
+	if storedMtime, ok := storedMtimes[absRoot]; ok && storedMtime == rootMtime {
+		log.Printf("scanner: root %s unchanged (mtime match), skipping scan", absRoot)
+		// Root is unchanged — clear all deletion marks and return.
+		// (MarkAllForDeletion was already called above.)
+		if err := s.db.ClearDeletionMarks(ctx); err != nil {
+			return fmt.Errorf("clear deletion marks: %w", err)
+		}
+		close(workCh)
+		for range dirResultCh {
+			// drain — nothing expected
+		}
+		close(entryCh)
+		writerWg.Wait()
+		return nil
+	}
+
 	// Send root.
 	dispatched[absRoot] = true
 	atomic.AddInt64(&pending, 1)
@@ -162,7 +209,7 @@ func (s *Scanner) Scan(ctx context.Context, root string) error {
 	// Process results from workers.
 	for result := range dirResultCh {
 		log.Printf("scanner: received result for %s", result.path)
-		newPending := atomic.AddInt64(&pending, -1)
+		atomic.AddInt64(&pending, -1)
 
 		di := &dirInfo{
 			path:       result.path,
@@ -170,26 +217,93 @@ func (s *Scanner) Scan(ctx context.Context, root string) error {
 			name:       result.name,
 			directSize: result.directSize,
 			mtime:      result.mtime,
-			children:   result.subdirs,
 			totalSize:  -1, // not yet computed
 			done:       false,
 		}
 		dirs[result.path] = di
 
-		// Dispatch subdirectories.
+		// Dispatch subdirectories with shallow/mtime filtering.
+		var actualChildren []string // children that will be scanned deeply
+		var shallowSizes []int64  // sizes of shallow children (added to parent's directSize)
 		for _, sub := range result.subdirs {
+			basename := filepath.Base(sub)
+
+			// Shallow check: if matches pattern, compute total size and send entry directly.
+			if s.shallowPatterns[basename] {
+				size, err := shallowSize(sub)
+				if err != nil {
+					log.Printf("scanner: shallow scan %s error: %v", sub, err)
+					size = 0
+				}
+				subInfo, _ := os.Stat(sub)
+				var subMtime int64
+				if subInfo != nil {
+					subMtime = subInfo.ModTime().UnixMilli()
+				}
+				select {
+				case entryCh <- scanEntry{
+					Path:       sub,
+					ParentPath: result.path,
+					Name:       basename,
+					Size:       size,
+					Mtime:      subMtime,
+					Shallow:    true,
+				}:
+				case <-ctx.Done():
+				}
+				log.Printf("scanner: shallow dir %s size=%d", sub, size)
+				shallowSizes = append(shallowSizes, size)
+				continue // don't add to children — size already includes all contents
+			}
+
+			// Mtime check: skip if unchanged (incremental optimization).
+			subInfo, subErr := os.Stat(sub)
+			if subErr == nil {
+				subMtime := subInfo.ModTime().UnixMilli()
+				if sm, ok := storedMtimes[sub]; ok && sm == subMtime {
+					log.Printf("scanner: skipping unchanged dir %s", sub)
+					// Re-upsert to clear pending_deletion flag so it's not deleted.
+					select {
+					case entryCh <- scanEntry{
+						Path:       sub,
+						ParentPath: result.path,
+						Name:       filepath.Base(sub),
+						Size:       0, // size not re-computed; DB retains old value
+						Mtime:      subMtime,
+						Shallow:    false,
+						SkipSize:   true, // signal to writer: don't overwrite size
+					}:
+					case <-ctx.Done():
+					}
+					continue // skip this subtree entirely
+				}
+			}
+
 			if !dispatched[sub] {
 				dispatched[sub] = true
 				atomic.AddInt64(&pending, 1)
-				select {
-				case workCh <- sub:
-				case <-ctx.Done():
-				}
+				actualChildren = append(actualChildren, sub)
 			}
 		}
 
+		// Dispatch deeply-scanned children to workers.
+		for _, sub := range actualChildren {
+			select {
+			case workCh <- sub:
+			case <-ctx.Done():
+			}
+		}
+
+		// Use only deeply-scanned children for size computation.
+		di.children = actualChildren
+
+		// Add shallow children sizes to directSize so parent total includes them.
+		for _, ss := range shallowSizes {
+			di.directSize += ss
+		}
+
 		// Check if this directory is ready (no children).
-		if len(result.subdirs) == 0 {
+		if len(actualChildren) == 0 {
 			// Leaf directory — compute size and propagate.
 			di.totalSize = di.directSize
 			di.done = true
@@ -198,7 +312,7 @@ func (s *Scanner) Scan(ctx context.Context, root string) error {
 		} else {
 			// Check if any children are already done.
 			remaining := 0
-			for _, childPath := range result.subdirs {
+			for _, childPath := range actualChildren {
 				if child, ok := dirs[childPath]; ok && child.done {
 					// Child already computed — count it.
 				} else {
@@ -212,16 +326,25 @@ func (s *Scanner) Scan(ctx context.Context, root string) error {
 			// Otherwise, we'll be notified when remaining children finish.
 		}
 
-		// If no more directories in flight, close workCh.
-		if newPending == 0 {
+		// If no more directories in flight, close workCh so workers exit.
+		if atomic.LoadInt64(&pending) == 0 {
 			log.Printf("scanner: pending=0, closing workCh")
 			close(workCh)
 		}
 	}
 
-	// Workers have finished. All directories processed.
+	// dirResultCh is closed (all workers done). All directories processed.
 	close(entryCh)
 	writerWg.Wait()
+
+	// Delete directories that were marked for deletion but not re-scanned.
+	deleted, err := s.db.DeleteMarked(ctx)
+	if err != nil {
+		return fmt.Errorf("delete marked: %w", err)
+	}
+	if deleted > 0 {
+		log.Printf("scanner: deleted %d stale directory entries", deleted)
+	}
 
 	if writerErr != nil {
 		return fmt.Errorf("writer: %w", writerErr)

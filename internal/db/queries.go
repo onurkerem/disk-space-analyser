@@ -112,6 +112,16 @@ func (d *DB) MarkAllForDeletion(ctx context.Context) error {
 	return nil
 }
 
+// ClearDeletionMarks removes the pending_deletion flag from all entries.
+// Used when a scan is skipped entirely (root unchanged) to preserve all entries.
+func (d *DB) ClearDeletionMarks(ctx context.Context) error {
+	_, err := d.db.ExecContext(ctx, `UPDATE directories SET pending_deletion = 0`)
+	if err != nil {
+		return fmt.Errorf("clear deletion marks: %w", err)
+	}
+	return nil
+}
+
 // DeleteMarked removes all entries flagged for deletion. Returns the number of rows deleted.
 func (d *DB) DeleteMarked(ctx context.Context) (int64, error) {
 	res, err := d.db.ExecContext(ctx, `DELETE FROM directories WHERE pending_deletion = 1`)
@@ -134,6 +144,27 @@ func (d *DB) GetDirMtime(ctx context.Context, path string) (int64, error) {
 		return 0, fmt.Errorf("get mtime for %s: %w", path, err)
 	}
 	return mtime, nil
+}
+
+// GetAllMtimes returns a map of all directory paths to their stored mtimes.
+// Used for bulk pre-fetch during incremental scanning to avoid per-directory DB reads.
+func (d *DB) GetAllMtimes(ctx context.Context) (map[string]int64, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT path, mtime FROM directories`)
+	if err != nil {
+		return nil, fmt.Errorf("get all mtimes: %w", err)
+	}
+	defer rows.Close()
+
+	mtimes := make(map[string]int64)
+	for rows.Next() {
+		var path string
+		var mtime int64
+		if err := rows.Scan(&path, &mtime); err != nil {
+			return nil, fmt.Errorf("scan mtime row: %w", err)
+		}
+		mtimes[path] = mtime
+	}
+	return mtimes, rows.Err()
 }
 
 // CountDirs returns the total number of directory entries.
@@ -160,7 +191,8 @@ func (d *DB) BatchUpsert(ctx context.Context, entries []BatchEntry, scannedAt in
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, `
+	// Prepare two statements: full upsert and touch-only (preserves size).
+	upsertStmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO directories (path, parent_path, name, size, mtime, shallow, scanned_at, pending_deletion)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 0)
 		ON CONFLICT(path) DO UPDATE SET
@@ -175,12 +207,28 @@ func (d *DB) BatchUpsert(ctx context.Context, entries []BatchEntry, scannedAt in
 	if err != nil {
 		return fmt.Errorf("prepare batch upsert: %w", err)
 	}
-	defer stmt.Close()
+	defer upsertStmt.Close()
+
+	touchStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO directories (path, parent_path, name, size, mtime, shallow, scanned_at, pending_deletion)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+		ON CONFLICT(path) DO UPDATE SET
+			scanned_at=excluded.scanned_at,
+			pending_deletion=0
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare batch touch: %w", err)
+	}
+	defer touchStmt.Close()
 
 	for _, e := range entries {
 		shallowInt := 0
 		if e.Shallow {
 			shallowInt = 1
+		}
+		stmt := upsertStmt
+		if e.SkipSize {
+			stmt = touchStmt
 		}
 		if _, err := stmt.ExecContext(ctx, e.Path, e.ParentPath, e.Name, e.Size, e.Mtime, shallowInt, scannedAt); err != nil {
 			return fmt.Errorf("batch upsert %s: %w", e.Path, err)
@@ -201,6 +249,7 @@ type BatchEntry struct {
 	Size       int64
 	Mtime      int64
 	Shallow    bool
+	SkipSize   bool // if true, don't overwrite existing size (preserve old value)
 }
 
 // scanDirEntries scans rows from a SELECT with columns: path, parent_path, name, size, mtime, shallow.
