@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -160,6 +159,14 @@ func cmdStop() {
 
 	fmt.Fprintf(os.Stderr, "Daemon did not stop gracefully, sending SIGKILL\n")
 	_ = syscall.Kill(pid, syscall.SIGKILL)
+	// Wait for SIGKILL to take effect.
+	for i := 0; i < 10; i++ {
+		time.Sleep(200 * time.Millisecond)
+		if !daemon.IsRunning(pid) {
+			break
+		}
+	}
+	_ = daemon.RemovePID(pidFilePath)
 	fmt.Printf("Daemon killed (PID: %d)\n", pid)
 }
 
@@ -171,42 +178,34 @@ func cmdStatus() {
 	}
 
 	pid, err := daemon.ReadPID(pidFilePath)
-	if err != nil {
-		fmt.Println("Daemon is not running (no PID file)")
-		os.Exit(0)
-	}
+	pidExists := err == nil
+	running := pidExists && daemon.IsRunning(pid)
 
-	if !daemon.IsRunning(pid) {
-		fmt.Println("Daemon is not running (stale PID file)")
-		os.Exit(0)
-	}
-
-	fmt.Printf("Daemon running (PID: %d)\n", pid)
-
+	// Read status file regardless of daemon state.
 	statusFilePath, err := daemon.StatusPath()
 	if err != nil {
-		return
+		log.Fatalf("resolve status path: %v", err)
+	}
+	status, _ := daemon.ReadStatus(statusFilePath) // zero-value OK if missing
+
+	if running {
+		fmt.Printf("Daemon running (PID: %d)\n", pid)
+	} else if pidExists {
+		fmt.Println("Daemon is not running (stale PID file)")
+	} else if status.ScannedAt != "" {
+		fmt.Println("Daemon is not running")
+	} else {
+		fmt.Println("Daemon has not been started yet")
 	}
 
-	data, err := os.ReadFile(statusFilePath)
-	if err != nil {
-		fmt.Println("No scan status available yet")
-		return
-	}
-
-	var status daemon.Status
-	if err := json.Unmarshal(data, &status); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing status file: %v\n", err)
-		return
-	}
-
-	fmt.Printf("Root: %s\n", status.RootPath)
-	fmt.Printf("Scanned directories: %d\n", status.ScannedDirs)
+	// Show last scan metadata when available.
 	if status.ScannedAt != "" {
-		fmt.Printf("Last scan: %s\n", status.ScannedAt)
-	}
-	if status.Error != "" {
-		fmt.Printf("Last error: %s\n", status.Error)
+		fmt.Printf("  Root path:          %s\n", status.RootPath)
+		fmt.Printf("  Last scan:          %s\n", status.ScannedAt)
+		fmt.Printf("  Directories scanned: %d\n", status.ScannedDirs)
+		if status.Error != "" {
+			fmt.Printf("  Last error:         %s\n", status.Error)
+		}
 	}
 }
 
@@ -285,10 +284,7 @@ func runDaemon(rootPath string) {
 			log.Printf("daemon: scan complete, %d directories", status.ScannedDirs)
 		}
 
-		data, err := json.MarshalIndent(status, "", "  ")
-		if err != nil {
-			log.Printf("daemon: marshal status: %v", err)
-		} else if err := os.WriteFile(statusFilePath, data, 0o644); err != nil {
+		if err := daemon.WriteStatus(statusFilePath, status); err != nil {
 			log.Printf("daemon: write status file: %v", err)
 		}
 	}
