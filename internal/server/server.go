@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,6 +14,9 @@ import (
 	"disk-space-analyser/internal/db"
 	ifmt "disk-space-analyser/internal/fmt"
 )
+
+//go:embed web/report.html
+var staticAssets embed.FS
 
 // DefaultPort is the default TCP port for the HTTP server.
 const DefaultPort = 3097
@@ -142,15 +146,19 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toDirResponses(entries))
 }
 
-// handleReport serves a placeholder for the future static report page.
+// handleReport serves the web report UI.
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "Report page — coming soon")
+	data, err := staticAssets.ReadFile("web/report.html")
+	if err != nil {
+		http.Error(w, "report not found", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(data)
 }
 
 // handleRoot redirects to /report.
