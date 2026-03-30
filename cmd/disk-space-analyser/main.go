@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -41,6 +43,9 @@ func main() {
 	case "status":
 		cmdStatus()
 
+	case "clear":
+		cmdClear()
+
 	case "_daemon":
 		// Hidden subcommand — only invoked by the forked child process.
 		if len(os.Args) < 3 {
@@ -61,6 +66,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  start [path]   Start the daemon (default path: /)")
 	fmt.Fprintln(os.Stderr, "  stop           Stop the running daemon")
 	fmt.Fprintln(os.Stderr, "  status         Show daemon status")
+	fmt.Fprintln(os.Stderr, "  clear          Clear all scan data from the database")
 }
 
 // cmdStart forks the daemon process in the background.
@@ -210,6 +216,59 @@ func cmdStatus() {
 			fmt.Printf("  Last error:         %s\n", status.Error)
 		}
 	}
+}
+
+// cmdClear deletes all scan data from the database after confirmation.
+func cmdClear() {
+	pidFilePath, err := daemon.PIDPath()
+	if err != nil {
+		log.Fatalf("resolve pid path: %v", err)
+	}
+
+	// Refuse if daemon is running.
+	if pid, err := daemon.ReadPID(pidFilePath); err == nil && daemon.IsRunning(pid) {
+		fmt.Fprintln(os.Stderr, "Cannot clear: daemon is running. Stop it first with 'stop'.")
+		os.Exit(1)
+	}
+
+	// Confirm.
+	fmt.Print("Are you sure you want to clear all scan data? [y/N]: ")
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
+	if input != "y" && input != "yes" {
+		fmt.Println("Aborted.")
+		os.Exit(0)
+	}
+
+	// Open DB and truncate.
+	dbPath, err := daemon.DBPath()
+	if err != nil {
+		log.Fatalf("resolve db path: %v", err)
+	}
+	database, err := db.Open(dbPath)
+	if err != nil {
+		log.Fatalf("open database: %v", err)
+	}
+	defer database.Close()
+
+	if err := database.Truncate(context.Background()); err != nil {
+		log.Fatalf("clear database: %v", err)
+	}
+
+	// Reset status file.
+	statusFilePath, err := daemon.StatusPath()
+	if err != nil {
+		log.Printf("warning: resolve status path: %v", err)
+	} else {
+		_ = daemon.WriteStatus(statusFilePath, daemon.Status{})
+	}
+
+	count, err := database.CountDirs(context.Background())
+	if err != nil {
+		log.Printf("warning: count after clear: %v", err)
+	}
+	fmt.Printf("Scan data cleared (%d entries remaining).\n", count)
 }
 
 // runDaemon is the main loop of the backgrounded daemon process.
