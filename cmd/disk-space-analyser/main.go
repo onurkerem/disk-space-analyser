@@ -208,7 +208,10 @@ func cmdStatus() {
 	}
 
 	// Show last scan metadata when available.
-	if status.ScannedAt != "" {
+	if status.Scanning {
+		fmt.Printf("  Root path:          %s\n", status.RootPath)
+		fmt.Println("  Status:             scanning...")
+	} else if status.ScannedAt != "" {
 		fmt.Printf("  Root path:          %s\n", status.RootPath)
 		fmt.Printf("  Last scan:          %s\n", status.ScannedAt)
 		fmt.Printf("  Directories scanned: %d\n", status.ScannedDirs)
@@ -317,15 +320,27 @@ func runDaemon(rootPath string) {
 		close(done)
 	}()
 
-	// Run scan.
-	s := scanner.New(database, scanner.DefaultConfig())
-	scanErr := s.Scan(ctx, rootPath)
-
-	// Write status.
+	// Write initial "scanning" status so `status` command reflects the new path immediately.
 	statusFilePath, err := daemon.StatusPath()
 	if err != nil {
 		log.Printf("daemon: resolve status path: %v", err)
 	} else {
+		if err := daemon.WriteStatus(statusFilePath, daemon.Status{
+			PID:      int64(ownPID),
+			Running:  true,
+			RootPath: rootPath,
+			Scanning: true,
+		}); err != nil {
+			log.Printf("daemon: write initial status: %v", err)
+		}
+	}
+
+	// Run scan.
+	s := scanner.New(database, scanner.DefaultConfig())
+	scanErr := s.Scan(ctx, rootPath)
+
+	// Write final status.
+	if statusFilePath != "" {
 		status := daemon.Status{
 			PID:      int64(ownPID),
 			Running:  true,

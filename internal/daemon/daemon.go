@@ -58,10 +58,11 @@ func DBPath() (string, error) {
 
 // Status represents the runtime state of the daemon, written to status.json.
 type Status struct {
-	PID        int64  `json:"pid"`
-	Running    bool   `json:"running"`
-	RootPath   string `json:"root_path"`
-	ScannedDirs int64 `json:"scanned_dirs"`
-	ScannedAt  string `json:"scanned_at"`
-	Error      string `json:"error,omitempty"`
+	PID         int64  `json:"pid"`
+	Running     bool   `json:"running"`
+	Scanning    bool   `json:"scanning,omitempty"`
+	RootPath    string `json:"root_path"`
+	ScannedDirs int64  `json:"scanned_dirs"`
+	ScannedAt   string `json:"scanned_at"`
+	Error       string `json:"error,omitempty"`
 }
