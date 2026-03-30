@@ -167,6 +167,15 @@ func (d *DB) GetAllMtimes(ctx context.Context) (map[string]int64, error) {
 	return mtimes, rows.Err()
 }
 
+// Truncate deletes all rows from the directories table.
+func (d *DB) Truncate(ctx context.Context) error {
+	_, err := d.db.ExecContext(ctx, `DELETE FROM directories`)
+	if err != nil {
+		return fmt.Errorf("truncate directories: %w", err)
+	}
+	return nil
+}
+
 // CountDirs returns the total number of directory entries.
 func (d *DB) CountDirs(ctx context.Context) (int64, error) {
 	row := d.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM directories`)

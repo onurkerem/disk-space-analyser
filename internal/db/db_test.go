@@ -244,6 +244,36 @@ func TestCountDirs(t *testing.T) {
 	}
 }
 
+func TestTruncate(t *testing.T) {
+	db := helperNewDB(t)
+	ctx := context.Background()
+
+	// Insert some rows.
+	for i := 0; i < 5; i++ {
+		helperUpsert(t, db, "/dir"+string(rune('a'+i)), "/", string(rune('a'+i)), int64(i)*100, 1, false)
+	}
+
+	count, err := db.CountDirs(ctx)
+	if err != nil {
+		t.Fatalf("count before truncate: %v", err)
+	}
+	if count != 5 {
+		t.Fatalf("count before = %d, want 5", count)
+	}
+
+	if err := db.Truncate(ctx); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+
+	count, err = db.CountDirs(ctx)
+	if err != nil {
+		t.Fatalf("count after truncate: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count after = %d, want 0", count)
+	}
+}
+
 func TestGetDirNotFound(t *testing.T) {
 	db := helperNewDB(t)
 	ctx := context.Background()
