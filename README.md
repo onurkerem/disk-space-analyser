@@ -32,6 +32,7 @@ go build -o disk-space-analyser ./cmd/disk-space-analyser
 ./disk-space-analyser start /home     # scan a specific path
 ./disk-space-analyser stop            # stop the daemon
 ./disk-space-analyser status          # show daemon and last scan status
+./disk-space-analyser clear           # clear all scan data from the database
 ```
 
 After starting, the daemon scans in the background and starts an HTTP server. View the report at:
