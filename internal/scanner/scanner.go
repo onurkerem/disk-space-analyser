@@ -26,27 +26,30 @@ type scanEntry struct {
 
 // Config holds tuning parameters for the scanner.
 type Config struct {
-	Concurrency int // max concurrent walker goroutines
-	BatchSize   int // rows per DB transaction
-	ChannelSize int // buffered channel capacity
+	Concurrency       int   // max concurrent walker goroutines
+	BatchSize         int   // rows per DB transaction
+	ChannelSize       int   // buffered channel capacity
+	SmallDirThreshold int64 // dirs under this size (bytes) are shallow-scanned; 0 = disabled
 }
 
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		Concurrency: runtime.NumCPU() * 4,
-		BatchSize:   1000,
-		ChannelSize: 10000,
+		Concurrency:       runtime.NumCPU() * 4,
+		BatchSize:         1000,
+		ChannelSize:       10000,
+		SmallDirThreshold: 1 << 30, // 1 GB
 	}
 }
 
 // Scanner performs concurrent filesystem scanning and persists results to SQLite.
 type Scanner struct {
-	db              *db.DB
-	concurrency     int
-	batchSize       int
-	channelSize     int
-	shallowPatterns map[string]bool
+	db                *db.DB
+	concurrency       int
+	batchSize         int
+	channelSize       int
+	shallowPatterns   map[string]bool
+	smallDirThreshold int64
 }
 
 // New creates a new Scanner with the given database and configuration.
@@ -60,12 +63,19 @@ func New(database *db.DB, cfg Config) *Scanner {
 	if cfg.ChannelSize <= 0 {
 		cfg.ChannelSize = DefaultConfig().ChannelSize
 	}
+	smallDirThreshold := cfg.SmallDirThreshold
+	// Only use default if caller didn't explicitly set a value.
+	// Negative and zero both mean "disabled".
+	if smallDirThreshold <= 0 {
+		smallDirThreshold = 0
+	}
 	return &Scanner{
-		db:              database,
-		concurrency:     cfg.Concurrency,
-		batchSize:       cfg.BatchSize,
-		channelSize:     cfg.ChannelSize,
-		shallowPatterns: DefaultShallowPatterns,
+		db:                database,
+		concurrency:       cfg.Concurrency,
+		batchSize:         cfg.BatchSize,
+		channelSize:       cfg.ChannelSize,
+		shallowPatterns:   DefaultShallowPatterns,
+		smallDirThreshold: smallDirThreshold,
 	}
 }
 
@@ -254,6 +264,37 @@ func (s *Scanner) Scan(ctx context.Context, root string) error {
 				log.Printf("scanner: shallow dir %s size=%d", sub, size)
 				shallowSizes = append(shallowSizes, size)
 				continue // don't add to children — size already includes all contents
+			}
+
+			// Size-threshold check: if enabled and subdir total size is under threshold,
+			// treat as shallow (compute total size but don't persist child entries).
+			if s.smallDirThreshold > 0 {
+				size, err := shallowSize(sub)
+				if err != nil {
+					log.Printf("scanner: size-threshold check %s error: %v", sub, err)
+					size = 0
+				}
+				if size < s.smallDirThreshold {
+					subInfo, _ := os.Stat(sub)
+					var subMtime int64
+					if subInfo != nil {
+						subMtime = subInfo.ModTime().UnixMilli()
+					}
+					select {
+					case entryCh <- scanEntry{
+						Path:       sub,
+						ParentPath: result.path,
+						Name:       basename,
+						Size:       size,
+						Mtime:      subMtime,
+						Shallow:    true,
+					}:
+					case <-ctx.Done():
+					}
+					log.Printf("scanner: small dir %s size=%d (below threshold %d)", sub, size, s.smallDirThreshold)
+					shallowSizes = append(shallowSizes, size)
+					continue
+				}
 			}
 
 			// Mtime check: skip if unchanged (incremental optimization).
