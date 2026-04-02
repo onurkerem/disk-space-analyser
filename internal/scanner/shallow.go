@@ -41,7 +41,7 @@ func shallowSize(dirPath string) (int64, error) {
 				return nil
 			}
 			mu.Lock()
-			totalSize += info.Size()
+			totalSize += diskUsage(info)
 			mu.Unlock()
 		}
 		return nil

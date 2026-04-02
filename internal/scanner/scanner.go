@@ -9,9 +9,20 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"syscall"
 
 	"disk-space-analyser/internal/db"
 )
+
+// diskUsage returns actual disk space consumed by a file in bytes.
+// Uses stat.Blocks (512-byte blocks) which accounts for sparse files,
+// unlike os.FileInfo.Size() which returns the apparent (logical) size.
+func diskUsage(info os.FileInfo) int64 {
+	if sys, ok := info.Sys().(*syscall.Stat_t); ok {
+		return sys.Blocks * 512 // Blocks are in 512-byte units
+	}
+	return info.Size()
+}
 
 // scanEntry represents a single directory to be persisted.
 type scanEntry struct {
@@ -486,7 +497,7 @@ func readDir(dir string) dirResult {
 				log.Printf("scanner: stat file %s: %v", fullPath, err)
 				continue
 			}
-			directSize += info.Size()
+			directSize += diskUsage(info)
 		}
 	}
 

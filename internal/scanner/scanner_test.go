@@ -27,6 +27,28 @@ func createTestTree(t *testing.T, root string, structure map[string]int64) {
 	}
 }
 
+// computeDiskUsage walks dir and returns the total disk space used by all files.
+// Uses block-based measurement (matching the scanner's diskUsage function)
+// so test expectations account for actual filesystem block sizes.
+func computeDiskUsage(t *testing.T, dir string) int64 {
+	t.Helper()
+	var total int64
+	filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			total += diskUsage(info)
+		}
+		return nil
+	})
+	return total
+}
+
 func TestScanFlatDirectory(t *testing.T) {
 	root := t.TempDir()
 	database, err := db.OpenMemory()
@@ -65,7 +87,7 @@ func TestScanFlatDirectory(t *testing.T) {
 		t.Errorf("expected 1 dir entry, got %d", count)
 	}
 
-	// Verify total size = 100+200+300+400+500 = 1500.
+	// Verify total size matches actual disk usage.
 	entry, err := database.GetDir(ctx, root)
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +95,7 @@ func TestScanFlatDirectory(t *testing.T) {
 	if entry == nil {
 		t.Fatal("root entry not found in DB")
 	}
-	expectedSize := int64(1500)
+	expectedSize := computeDiskUsage(t, root)
 	if entry.Size != expectedSize {
 		t.Errorf("expected size %d, got %d", expectedSize, entry.Size)
 	}
@@ -118,8 +140,8 @@ func TestScanNestedDirectories(t *testing.T) {
 	if rootEntry == nil {
 		t.Fatal("root not found")
 	}
-	if rootEntry.Size != 600 {
-		t.Errorf("root size: expected 600, got %d", rootEntry.Size)
+	if rootEntry.Size != computeDiskUsage(t, root) {
+		t.Errorf("root size: expected %d, got %d", computeDiskUsage(t, root), rootEntry.Size)
 	}
 
 	// Verify sub3 size = 300 (has nested/file3).
@@ -131,8 +153,8 @@ func TestScanNestedDirectories(t *testing.T) {
 	if sub3Entry == nil {
 		t.Fatal("sub3 not found")
 	}
-	if sub3Entry.Size != 300 {
-		t.Errorf("sub3 size: expected 300, got %d", sub3Entry.Size)
+	if sub3Entry.Size != computeDiskUsage(t, sub3) {
+		t.Errorf("sub3 size: expected %d, got %d", computeDiskUsage(t, sub3), sub3Entry.Size)
 	}
 }
 
@@ -242,7 +264,7 @@ func TestScanDeepNesting(t *testing.T) {
 		t.Errorf("expected 11 dir entries, got %d", count)
 	}
 
-	// Verify root size = sum of all files = 100+200+...+1000 = 5500.
+	// Verify root size matches actual disk usage.
 	rootEntry, err := database.GetDir(ctx, root)
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +272,7 @@ func TestScanDeepNesting(t *testing.T) {
 	if rootEntry == nil {
 		t.Fatal("root not found")
 	}
-	expectedRoot := int64(5500)
+	expectedRoot := computeDiskUsage(t, root)
 	if rootEntry.Size != expectedRoot {
 		t.Errorf("root size: expected %d, got %d", expectedRoot, rootEntry.Size)
 	}
@@ -294,7 +316,7 @@ func TestScanManyFiles(t *testing.T) {
 	if entry == nil {
 		t.Fatal("root not found")
 	}
-	expectedSize := int64(500 * 64)
+	expectedSize := computeDiskUsage(t, root)
 	if entry.Size != expectedSize {
 		t.Errorf("expected size %d, got %d", expectedSize, entry.Size)
 	}
