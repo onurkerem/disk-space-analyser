@@ -26,3 +26,4 @@ vendor/
 coverage/
 .cache/
 tmp/
+disk-space-analyser

@@ -30,7 +30,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("open memory db: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
-	return New(database, 0, "/")
+	return New(database, 0, "/", "")
 }
 
 func TestSummaryDefault(t *testing.T) {
@@ -419,7 +419,7 @@ func TestMetaCustomRoot(t *testing.T) {
 	}
 	defer database.Close()
 
-	srv := New(database, 0, "/Users/kerem")
+	srv := New(database, 0, "/Users/kerem", "")
 
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

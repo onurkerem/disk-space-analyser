@@ -3,9 +3,12 @@
 const API_META = '/api/meta';
 const API_SUMMARY = '/api/summary?top=20';
 const API_TREE = '/api/tree';
+const API_STATUS = '/api/status';
 
 // ── State ──
 let rootPath = '/';
+let isScanning = false;
+let statusInterval = null;
 
 // ── API helpers ──
 
@@ -59,6 +62,40 @@ function displayPath(path) {
   return path;
 }
 
+// ── Scan status polling ──
+
+function startStatusPolling() {
+  pollStatus();
+  statusInterval = setInterval(pollStatus, 3000);
+}
+
+async function pollStatus() {
+  try {
+    const status = await api(API_STATUS);
+    const prev = isScanning;
+    isScanning = status.scanning;
+    updateScanBanner(status);
+    // Scan just finished — reload data
+    if (prev && !isScanning) {
+      loadSummary();
+      navigateTo(rootPath);
+    }
+  } catch (_) {
+    // Status endpoint not critical
+  }
+}
+
+function updateScanBanner(status) {
+  const banner = document.getElementById('scan-banner');
+  if (status.scanning) {
+    banner.style.display = 'flex';
+    const count = status.scanned_dirs || 0;
+    banner.querySelector('.scan-count').textContent = count.toLocaleString();
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
 // ── Summary ──
 
 async function loadSummary() {
@@ -81,7 +118,7 @@ async function loadSummary() {
       el.addEventListener('click', () => navigateTo(el.dataset.path));
     });
   } catch (e) {
-    list.innerHTML = `<div class="empty-state">Failed to load summary data</div>`;
+    list.innerHTML = '<div class="empty-state">Failed to load summary data</div>';
   }
 }
 
@@ -193,4 +230,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load summary and initial tree
   loadSummary();
   navigateTo(rootPath);
+
+  // Start polling for scan status
+  startStatusPolling();
 });

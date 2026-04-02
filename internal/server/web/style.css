@@ -411,3 +411,32 @@ section h2::after {
     margin-left: 12px;
   }
 }
+
+/* ── Scan Banner ── */
+.scan-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 24px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.scan-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent-dim);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.scan-count {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}

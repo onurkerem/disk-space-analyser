@@ -24,12 +24,17 @@ type scanEntry struct {
 	SkipSize   bool // if true, don't overwrite the existing size in DB
 }
 
+// ProgressCallback is called periodically during scanning to report progress.
+// scannedDirs is the number of directories written to the DB so far.
+type ProgressCallback func(scannedDirs int64)
+
 // Config holds tuning parameters for the scanner.
 type Config struct {
 	Concurrency       int   // max concurrent walker goroutines
 	BatchSize         int   // rows per DB transaction
 	ChannelSize       int   // buffered channel capacity
 	SmallDirThreshold int64 // dirs under this size (bytes) are shallow-scanned; 0 = disabled
+	OnProgress        ProgressCallback
 }
 
 // DefaultConfig returns sensible defaults.
@@ -50,6 +55,7 @@ type Scanner struct {
 	channelSize       int
 	shallowPatterns   map[string]bool
 	smallDirThreshold int64
+	onProgress        ProgressCallback
 }
 
 // New creates a new Scanner with the given database and configuration.
@@ -76,6 +82,7 @@ func New(database *db.DB, cfg Config) *Scanner {
 		channelSize:       cfg.ChannelSize,
 		shallowPatterns:   DefaultShallowPatterns,
 		smallDirThreshold: smallDirThreshold,
+		onProgress:        cfg.OnProgress,
 	}
 }
 

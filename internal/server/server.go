@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 
@@ -36,25 +37,36 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
+// scanStatusResponse is the JSON-serializable scan status.
+type scanStatusResponse struct {
+	Scanning    bool   `json:"scanning"`
+	ScannedDirs int64  `json:"scanned_dirs"`
+	ScannedAt   string `json:"scanned_at,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
 // Server wraps an http.Server with application-specific state.
 type Server struct {
 	httpServer *http.Server
 	database   *db.DB
 	mux        *http.ServeMux
 	rootPath   string
+	statusPath string // path to daemon status.json
 }
 
 // New creates a new Server bound to the given database and port.
-func New(database *db.DB, port int, rootPath string) *Server {
+func New(database *db.DB, port int, rootPath string, statusPath string) *Server {
 	s := &Server{
-		database: database,
-		mux:      http.NewServeMux(),
-		rootPath: rootPath,
+		database:   database,
+		mux:        http.NewServeMux(),
+		rootPath:   rootPath,
+		statusPath: statusPath,
 	}
 
 	s.mux.HandleFunc("/api/summary", s.handleSummary)
 	s.mux.HandleFunc("/api/tree", s.handleTree)
 	s.mux.HandleFunc("/api/meta", s.handleMeta)
+	s.mux.HandleFunc("/api/status", s.handleScanStatus)
 	s.mux.HandleFunc("/report", s.handleReport)
 	s.mux.HandleFunc("/", s.handleRoot)
 
@@ -180,6 +192,35 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"root": s.rootPath})
+}
+
+// handleScanStatus returns the current scan status by reading the daemon status file.
+func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp := scanStatusResponse{}
+	if s.statusPath != "" {
+		data, err := os.ReadFile(s.statusPath)
+		if err == nil {
+			var raw struct {
+				Scanning    bool   `json:"scanning"`
+				ScannedDirs int64  `json:"scanned_dirs"`
+				ScannedAt   string `json:"scanned_at"`
+				Error       string `json:"error"`
+			}
+			if json.Unmarshal(data, &raw) == nil {
+				resp = scanStatusResponse{
+					Scanning:    raw.Scanning,
+					ScannedDirs: raw.ScannedDirs,
+					ScannedAt:   raw.ScannedAt,
+					Error:       raw.Error,
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleRoot redirects to /report.

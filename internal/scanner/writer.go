@@ -29,6 +29,12 @@ func (s *Scanner) writer(ctx context.Context, results <-chan scanEntry) error {
 		if err := database.BatchUpsert(ctx, batch, scannedAt); err != nil {
 			return err
 		}
+		if s.onProgress != nil {
+			count, err := database.CountDirs(ctx)
+			if err == nil {
+				s.onProgress(count)
+			}
+		}
 		batch = batch[:0]
 		return nil
 	}

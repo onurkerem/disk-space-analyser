@@ -210,7 +210,11 @@ func cmdStatus() {
 	// Show last scan metadata when available.
 	if status.Scanning {
 		fmt.Printf("  Root path:          %s\n", status.RootPath)
-		fmt.Println("  Status:             scanning...")
+		if status.ScannedDirs > 0 {
+			fmt.Printf("  Status:             scanning... (%d dirs indexed)\n", status.ScannedDirs)
+	} else {
+			fmt.Println("  Status:             scanning...")
+		}
 	} else if status.ScannedAt != "" {
 		fmt.Printf("  Root path:          %s\n", status.RootPath)
 		fmt.Printf("  Last scan:          %s\n", status.ScannedAt)
@@ -320,11 +324,13 @@ func runDaemon(rootPath string) {
 		close(done)
 	}()
 
-	// Write initial "scanning" status so `status` command reflects the new path immediately.
 	statusFilePath, err := daemon.StatusPath()
 	if err != nil {
 		log.Printf("daemon: resolve status path: %v", err)
-	} else {
+	}
+
+	// Write initial "scanning" status.
+	if statusFilePath != "" {
 		if err := daemon.WriteStatus(statusFilePath, daemon.Status{
 			PID:      int64(ownPID),
 			Running:  true,
@@ -335,8 +341,40 @@ func runDaemon(rootPath string) {
 		}
 	}
 
-	// Run scan.
-	s := scanner.New(database, scanner.DefaultConfig())
+	// Start HTTP server BEFORE scan so the report is immediately available.
+	// Server runs concurrently — ListenAndServe blocks its goroutine until done closes.
+	srv := server.New(database, server.DefaultPort, rootPath, statusFilePath)
+	srvDone := make(chan struct{})
+	go func() {
+		defer close(srvDone)
+		log.Printf("daemon: http server listening on :%d", server.DefaultPort)
+		if err := srv.ListenAndServe(done); err != nil && err != http.ErrServerClosed {
+			log.Printf("daemon: http server error: %v", err)
+		}
+		log.Printf("daemon: http server stopped")
+	}()
+
+	// Run scan with progress callback that updates status.json.
+	progressCallback := func(scannedDirs int64) {
+		if statusFilePath == "" {
+			return
+		}
+		_ = daemon.WriteStatus(statusFilePath, daemon.Status{
+			PID:         int64(ownPID),
+			Running:     true,
+			RootPath:    rootPath,
+			Scanning:    true,
+			ScannedDirs: scannedDirs,
+		})
+	}
+
+	s := scanner.New(database, scanner.Config{
+		Concurrency:       scanner.DefaultConfig().Concurrency,
+		BatchSize:         scanner.DefaultConfig().BatchSize,
+		ChannelSize:       scanner.DefaultConfig().ChannelSize,
+		SmallDirThreshold: scanner.DefaultConfig().SmallDirThreshold,
+		OnProgress:        progressCallback,
+	})
 	scanErr := s.Scan(ctx, rootPath)
 
 	// Write final status.
@@ -366,11 +404,6 @@ func runDaemon(rootPath string) {
 		}
 	}
 
-	// Start HTTP server — blocks until done closes (signal triggers graceful shutdown).
-	srv := server.New(database, server.DefaultPort, rootPath)
-	log.Printf("daemon: http server listening on :%d", server.DefaultPort)
-	if err := srv.ListenAndServe(done); err != nil && err != http.ErrServerClosed {
-		log.Printf("daemon: http server error: %v", err)
-	}
-	log.Printf("daemon: http server stopped")
+	// Wait for server to finish (it exits when done channel closes on signal).
+	<-srvDone
 }
