@@ -53,7 +53,7 @@ dsa clear           Clear all scan data (stops daemon first)
 
 - **Concurrent scanning** — worker pool traverses directories in parallel
 - **Incremental rescans** — skips unchanged directories via mtime comparison
-- **Shallow scanning** — `.git`, `node_modules`, `venv`, etc. are treated as leaf nodes
+- **Shallow scanning** — known heavy directories (`.git`, `node_modules`, `venv`, etc.) and any directory under 1 GB total size are treated as leaf nodes
 - **Real-time progress** — web UI shows a scanning banner while the scan runs
 - **Persistent storage** — SQLite with WAL mode, no external dependencies
 - **Single binary** — pure Go, no CGO
