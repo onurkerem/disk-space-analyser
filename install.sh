@@ -165,8 +165,8 @@ update_source() {
 
 build_binary() {
     info "Building ${BIN_NAME}..."
-    cd "$INSTALL_DIR"
-    CGO_ENABLED=0 go build -o "$BIN_NAME" ./packages/cli/cmd/disk-space-analyser
+    cd "$INSTALL_DIR/packages/cli"
+    CGO_ENABLED=0 go build -o "$INSTALL_DIR/$BIN_NAME" ./cmd/disk-space-analyser
     ok "Built ${BIN_NAME}"
 }
 
