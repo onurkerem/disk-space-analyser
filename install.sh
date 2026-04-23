@@ -230,6 +230,12 @@ main() {
     echo -e "${BOLD}Disk Space Analyser — Installer${NC}"
     echo ""
 
+    if [[ "${1:-}" == "--uninstall" ]]; then
+        remove_existing
+        ok "Uninstalled"
+        exit 0
+    fi
+
     # Check if already installed
     local already_installed=false
     if [[ -d "$INSTALL_DIR" ]] || [[ -L "$LINK_PATH" ]] || [[ -e "$LINK_PATH" ]]; then
@@ -237,44 +243,11 @@ main() {
     fi
 
     if $already_installed; then
-        echo -e "${YELLOW}Existing installation detected.${NC}"
-        echo ""
-        echo "  1) Reinstall from scratch (remove everything, clone fresh)"
-        echo "  2) Update source and rebuild (keep data)"
-        echo "  3) Uninstall completely"
-        echo ""
-        if [[ -t 0 ]]; then
-            read -rp "Choose [1/2/3]: " choice
-        else
-            err "Run this script interactively to manage an existing installation."
-            exit 1
-        fi
-        case "$choice" in
-            1)
-                remove_existing
-                ensure_prerequisites
-                clone_source
-                build_binary
-                install_binary
-                verify_installation
-                ;;
-            2)
-                ensure_prerequisites
-                update_source
-                build_binary
-                install_binary
-                verify_installation
-                ;;
-            3)
-                remove_existing
-                ok "Uninstalled"
-                exit 0
-                ;;
-            *)
-                err "Invalid choice"
-                exit 1
-                ;;
-        esac
+        ensure_prerequisites
+        update_source
+        build_binary
+        install_binary
+        verify_installation
     else
         ensure_prerequisites
         clone_source
