@@ -27,7 +27,8 @@ vendor/
 coverage/
 .cache/
 tmp/
-disk-space-analyser
+/disk-space-analyser
+/dsa
 .agents/
 .claude/
 skills-lock.json
