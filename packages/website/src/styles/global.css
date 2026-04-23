@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  --font-headline: "Space Grotesk", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-label: "Inter", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --color-background: #f9f9f9;
+  --color-surface: #f9f9f9;
+  --color-surface-bright: #f9f9f9;
+  --color-surface-dim: #d3dbdd;
+  --color-surface-variant: #dde4e5;
+  --color-surface-container: #ebeeef;
+  --color-surface-container-low: #f2f4f4;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-high: #e4e9ea;
+  --color-surface-container-highest: #dde4e5;
+  --color-surface-tint: #5e5e5e;
+
+  --color-on-background: #2d3435;
+  --color-on-surface: #2d3435;
+  --color-on-surface-variant: #596061;
+
+  --color-primary: #5e5e5e;
+  --color-primary-dim: #525252;
+  --color-primary-container: #e2e2e2;
+  --color-primary-fixed: #e2e2e2;
+  --color-primary-fixed-dim: #d4d4d4;
+  --color-on-primary: #f8f8f8;
+  --color-on-primary-container: #525252;
+  --color-on-primary-fixed: #3f3f3f;
+  --color-on-primary-fixed-variant: #5b5b5b;
+
+  --color-secondary: #56606e;
+  --color-secondary-dim: #4a5462;
+  --color-secondary-container: #d9e3f4;
+  --color-secondary-fixed: #d9e3f4;
+  --color-secondary-fixed-dim: #cbd5e6;
+  --color-on-secondary: #f7f9ff;
+  --color-on-secondary-container: #485260;
+  --color-on-secondary-fixed: #36404d;
+  --color-on-secondary-fixed-variant: #525c6a;
+
+  --color-tertiary: #006d4a;
+  --color-tertiary-dim: #005f40;
+  --color-tertiary-container: #69f6b8;
+  --color-tertiary-fixed: #69f6b8;
+  --color-tertiary-fixed-dim: #58e7ab;
+  --color-on-tertiary: #e6ffee;
+  --color-on-tertiary-container: #005a3c;
+  --color-on-tertiary-fixed: #00452d;
+  --color-on-tertiary-fixed-variant: #006544;
+
+  --color-error: #9e3f4e;
+  --color-error-dim: #4f0116;
+  --color-error-container: #ff8b9a;
+  --color-on-error: #fff7f7;
+  --color-on-error-container: #782232;
+
+  --color-inverse-surface: #0c0f0f;
+  --color-inverse-on-surface: #9c9d9d;
+  --color-inverse-primary: #ffffff;
+
+  --color-outline: #757c7d;
+  --color-outline-variant: #acb3b4;
+}
+
+body {
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6, .font-headline {
+  font-family: var(--font-headline);
+}
+
+::selection {
+  background-color: var(--color-tertiary);
+  color: var(--color-on-tertiary);
+}

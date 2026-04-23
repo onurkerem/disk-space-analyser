@@ -71,13 +71,15 @@ dsa clear           Clear all scan data (stops daemon first)
 ## Project Structure
 
 ```
-cmd/disk-space-analyser/    CLI entry point, daemon fork, signal handling
-internal/
-  scanner/                  Worker pool, coordinator, batched writer
-  db/                       SQLite persistence, schema, queries
-  daemon/                   PID/status file, data directory management
-  server/                   HTTP server, JSON API, embedded web UI
-  fmt/                      Byte formatting utilities
+packages/cli/
+  cmd/disk-space-analyser/    CLI entry point, daemon fork, signal handling
+  internal/
+    scanner/                  Worker pool, coordinator, batched writer
+    db/                       SQLite persistence, schema, queries
+    daemon/                   PID/status file, data directory management
+    server/                   HTTP server, JSON API, embedded web UI
+    fmt/                      Byte formatting utilities
+packages/website/             Astro marketing site
 ```
 
 Data lives in `~/.disk-space-analyser/`.
@@ -87,8 +89,8 @@ Data lives in `~/.disk-space-analyser/`.
 ```bash
 git clone https://github.com/onurkerem/disk-space-analyser.git
 cd disk-space-analyser
-go build -o dsa ./cmd/disk-space-analyser
-go test ./...
+go build -o dsa ./packages/cli/cmd/disk-space-analyser
+cd packages/cli && go test ./...
 ```
 
 Requires Go 1.25+. macOS or Linux.

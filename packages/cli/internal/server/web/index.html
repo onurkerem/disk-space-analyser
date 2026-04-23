@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Disk Space Report</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Disk Space Report</h1>
+  <span id="scan-info"></span>
+</header>
+<div id="scan-banner" class="scan-banner" style="display:none">
+  <span class="scan-spinner"></span>
+  <span>Scanning&hellip; <span class="scan-count">0</span> directories indexed</span>
+</div>
+<main>
+  <section id="summary">
+    <h2>Largest Directories</h2>
+    <ol class="summary-list" id="summary-list">
+      <div class="empty-state">Loading...</div>
+    </ol>
+  </section>
+  <section id="tree">
+    <h2>Directory Tree</h2>
+    <div class="tree-path-bar" id="tree-breadcrumb"></div>
+    <div class="tree-header"><span>Directory</span><span style="text-align:right">Size</span></div>
+    <div id="tree-root">
+      <div class="tree-loading loading-spinner">Loading</div>
+    </div>
+  </section>
+</main>
+<div id="error-banner" class="error-banner" style="display:none"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
