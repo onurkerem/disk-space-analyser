@@ -27,3 +27,6 @@ coverage/
 .cache/
 tmp/
 disk-space-analyser
+.agents/
+.claude/
+skills-lock.json
